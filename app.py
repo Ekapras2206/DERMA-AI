@@ -75,36 +75,31 @@ elif mode == "Ambil dari Kamera":
 
 # === MODE 3: LIVE SCAN ===
 elif mode == "Live Scan":
-    st.warning("⚠️ Fitur live scan membutuhkan akses webcam (real-time). Tekan 'Mulai Scan' di bawah.")
-    start_scan = st.button("📷 Mulai Scan")
+    st.warning("🟢 Mode Live Scan aktif — pastikan izinkan kamera browser kamu.")
 
-    if start_scan:
-        cap = cv2.VideoCapture(0)
-        frame_placeholder = st.empty()
-        scan_button = st.button("📸 Scan Sekarang")
-        stop_button = st.button("❌ Berhenti")
+    run_scan = st.checkbox("Mulai Live Scan")
+    camera_feed = st.empty()
+    result_box = st.empty()
 
-        scanned_img = None
-        while cap.isOpened():
-            ret, frame = cap.read()
-            if not ret:
-                st.error("Kamera tidak terbaca.")
-                break
+    if run_scan:
+        st.info("📸 Kamera aktif. Tunggu hasil prediksi setiap beberapa detik...")
+        while run_scan:
+            frame = st.camera_input("Ambil gambar otomatis", key="live_camera")
 
-            frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            frame_placeholder.image(frame, channels="RGB", use_container_width=True)
+            if frame is not None:
+                img = Image.open(frame).convert("RGB")
+                img_tensor = preprocess_pil(img)
+                label, conf = get_prediction(img_tensor)
 
-            if scan_button:
-                scanned_img = Image.fromarray(frame)
-                img = scanned_img
-                st.success("✅ Gambar berhasil di-scan!")
-                break
+                camera_feed.image(img, caption="Frame terbaru", use_container_width=True)
+                result_box.markdown(
+                    f"<h3 style='text-align:center;'>Prediksi: {label.upper()} — {conf*100:.2f}%</h3>",
+                    unsafe_allow_html=True
+                )
 
-            if stop_button:
-                break
+            time.sleep(2)  # jeda 2 detik sebelum ambil frame baru
+            st.rerun()     # refresh loop Streamlit
 
-        cap.release()
-        cv2.destroyAllWindows()
 
 # === HASIL PREDIKSI ===
 if img is not None:
@@ -123,3 +118,4 @@ if img is not None:
 
 st.markdown("---")
 st.markdown("<p style='text-align: center; font-size: 13px; color: gray;'>Model dilatih menggunakan dataset HAM10000 — hanya untuk tujuan edukasi.</p>", unsafe_allow_html=True)
+
