@@ -1,37 +1,40 @@
 import streamlit as st
 import torch
 import torchvision.transforms as transforms
-from PIL import Image
-import numpy as np
 from torchvision import models
-import cv2
-import tempfile
+from PIL import Image
 import time
 
-# === CONFIGURATION ===
+# ==========================
+# 🔧 CONFIGURATION
+# ==========================
 MODEL_PATH = "model/derma_ai_final.pt"
 IMG_SIZE = 224
 CLASS_NAMES = ["akiec", "bcc", "bkl", "df", "nv", "mel", "vasc"]
 
 st.set_page_config(page_title="DERMA-AI (PyTorch)", layout="centered")
 
-# === LOAD MODEL ===
+# ==========================
+# 🔍 LOAD MODEL
+# ==========================
 @st.cache_resource
 def load_model(path=MODEL_PATH):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
     model = models.efficientnet_b0(pretrained=False)
     model.classifier[1] = torch.nn.Linear(model.classifier[1].in_features, len(CLASS_NAMES))
 
     state_dict = torch.load(path, map_location=device)
-    if isinstance(state_dict, dict):
-        model.load_state_dict(state_dict)
+    model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
     return model, device
 
 model, device = load_model()
 
-# === PREPROCESS ===
+# ==========================
+# 🧠 PREPROCESS FUNCTION
+# ==========================
 def preprocess_pil(img: Image.Image):
     transform = transforms.Compose([
         transforms.Resize((IMG_SIZE, IMG_SIZE)),
@@ -41,7 +44,9 @@ def preprocess_pil(img: Image.Image):
     ])
     return transform(img).unsqueeze(0)
 
-# === PREDICT ===
+# ==========================
+# 📊 PREDICTION FUNCTION
+# ==========================
 def get_prediction(img_tensor):
     img_tensor = img_tensor.to(device)
     with torch.no_grad():
@@ -50,13 +55,16 @@ def get_prediction(img_tensor):
         conf, idx = torch.max(probs, dim=1)
     return CLASS_NAMES[idx.item()], conf.item()
 
-# === HEADER ===
+# ==========================
+# 🩺 HEADER
+# ==========================
 st.markdown("<h1 style='text-align: center;'>DERMA-AI 🩺 (PyTorch)</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center;'>Upload atau ambil gambar kulitmu untuk klasifikasi lesi.</p>", unsafe_allow_html=True)
 
-# === PILIH MODE INPUT ===
-mode = st.radio("Pilih cara input gambar:", ["Upload Gambar", "Ambil dari Kamera", "Live Scan"])
-
+# ==========================
+# 🖼️ MODE INPUT
+# ==========================
+mode = st.radio("Pilih cara input gambar:", ["Upload Gambar", "Ambil dari Kamera", "Live Scan (beta)"])
 img = None
 
 # === MODE 1: UPLOAD FILE ===
@@ -73,35 +81,38 @@ elif mode == "Ambil dari Kamera":
         img = Image.open(camera_img).convert("RGB")
         st.image(img, caption="Foto hasil kamera", use_container_width=True)
 
-# === MODE 3: LIVE SCAN ===
-elif mode == "Live Scan":
+# === MODE 3: LIVE SCAN (BETA) ===
+elif mode == "Live Scan (beta)":
     st.warning("🟢 Mode Live Scan aktif — pastikan izinkan kamera browser kamu.")
-
-    run_scan = st.checkbox("Mulai Live Scan")
-    camera_feed = st.empty()
+    st.info("Klik tombol di bawah untuk mulai memindai secara berkala.")
+    
+    run_live = st.checkbox("Aktifkan Live Scan")
+    frame_box = st.empty()
     result_box = st.empty()
 
-    if run_scan:
-        st.info("📸 Kamera aktif. Tunggu hasil prediksi setiap beberapa detik...")
-        while run_scan:
-            frame = st.camera_input("Ambil gambar otomatis", key="live_camera")
+    if run_live:
+        while True:
+            frame = st.camera_input("Ambil gambar otomatis", key="live_scan")
 
             if frame is not None:
                 img = Image.open(frame).convert("RGB")
                 img_tensor = preprocess_pil(img)
                 label, conf = get_prediction(img_tensor)
 
-                camera_feed.image(img, caption="Frame terbaru", use_container_width=True)
+                frame_box.image(img, caption="Frame terbaru", use_container_width=True)
                 result_box.markdown(
                     f"<h3 style='text-align:center;'>Prediksi: {label.upper()} — {conf*100:.2f}%</h3>",
                     unsafe_allow_html=True
                 )
 
-            time.sleep(2)  # jeda 2 detik sebelum ambil frame baru
-            st.rerun()     # refresh loop Streamlit
+            time.sleep(3)
+            # Gunakan break agar tidak infinite loop tanpa kontrol
+            if not st.session_state.get("run_live", True):
+                break
 
-
-# === HASIL PREDIKSI ===
+# ==========================
+# 📈 HASIL PREDIKSI (untuk Upload / Kamera)
+# ==========================
 if img is not None:
     img_tensor = preprocess_pil(img)
     label, conf = get_prediction(img_tensor)
@@ -116,6 +127,11 @@ if img is not None:
         unsafe_allow_html=True
     )
 
+# ==========================
+# 📚 FOOTER
+# ==========================
 st.markdown("---")
-st.markdown("<p style='text-align: center; font-size: 13px; color: gray;'>Model dilatih menggunakan dataset HAM10000 — hanya untuk tujuan edukasi.</p>", unsafe_allow_html=True)
-
+st.markdown(
+    "<p style='text-align: center; font-size: 13px; color: gray;'>Model dilatih menggunakan dataset HAM10000 — hanya untuk tujuan edukasi.</p>",
+    unsafe_allow_html=True
+)
