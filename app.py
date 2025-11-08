@@ -72,7 +72,7 @@ if mode == "Upload Gambar":
     uploaded = st.file_uploader("Pilih gambar kulit (JPG/PNG)", type=["jpg", "jpeg", "png"])
     if uploaded:
         img = Image.open(uploaded).convert("RGB")
-        st.image(img, caption="Gambar yang kamu upload", use_container_width=True)
+        st.image(img, caption="Gambar yang kamu upload")
 
 # === MODE 2: CAMERA SNAPSHOT ===
 elif mode == "Ambil dari Kamera":
@@ -81,7 +81,7 @@ elif mode == "Ambil dari Kamera":
     if camera_img is not None:
         try:
             img = Image.open(camera_img).convert("RGB")
-            st.image(img, caption="Foto hasil kamera", use_container_width=True)
+            st.image(img, caption="Foto hasil kamera")
         except Exception as e:
             st.error(f"❌ Gagal membaca gambar dari kamera: {e}")
     else:
@@ -107,7 +107,7 @@ elif mode == "Live Scan":
         if live_img is not None:
             try:
                 img = Image.open(live_img).convert("RGB")
-                st.image(img, caption="Frame terbaru", use_container_width=True)
+                st.image(img, caption="Frame terbaru")
 
                 # Prediksi langsung
                 img_tensor = preprocess_pil(img)
@@ -146,3 +146,4 @@ st.markdown(
     "<p style='text-align: center; font-size: 13px; color: gray;'>Model dilatih menggunakan dataset HAM10000 — hanya untuk tujuan edukasi.</p>",
     unsafe_allow_html=True
 )
+
