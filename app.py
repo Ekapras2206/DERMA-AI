@@ -3,7 +3,8 @@ import torch
 import torchvision.transforms as transforms
 from torchvision import models
 from PIL import Image
-import time
+import numpy as np
+import cv2
 
 # ==========================
 # 🔧 CONFIGURATION
@@ -45,6 +46,24 @@ def preprocess_pil(img: Image.Image):
     return transform(img).unsqueeze(0)
 
 # ==========================
+# 🧴 SKIN FILTER (OpenCV)
+# ==========================
+def is_skin_image(pil_img, threshold=0.05):
+    """Cek apakah gambar mengandung area kulit cukup besar"""
+    img = np.array(pil_img.convert("RGB"))
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+    # Rentang warna kulit umum dalam HSV
+    lower = np.array([0, 30, 60], dtype=np.uint8)
+    upper = np.array([20, 150, 255], dtype=np.uint8)
+
+    mask = cv2.inRange(hsv, lower, upper)
+    skin_ratio = np.sum(mask > 0) / (mask.shape[0] * mask.shape[1])
+
+    return skin_ratio > threshold, skin_ratio
+
+# ==========================
 # 📊 PREDICTION FUNCTION
 # ==========================
 def get_prediction(img_tensor):
@@ -64,7 +83,7 @@ st.markdown("<p style='text-align: center;'>Upload atau ambil gambar kulitmu unt
 # ==========================
 # 🖼️ MODE INPUT
 # ==========================
-mode = st.radio("Pilih cara input gambar:", ["Upload Gambar", "Ambil dari Kamera", "Live Scan (beta)"])
+mode = st.radio("Pilih cara input gambar:", ["Upload Gambar", "Ambil dari Kamera"])
 img = None
 
 # === MODE 1: UPLOAD FILE ===
@@ -87,56 +106,29 @@ elif mode == "Ambil dari Kamera":
     else:
         st.info("Silakan ambil foto terlebih dahulu.")
 
-# === MODE 3: LIVE SCAN (SIMULATED LOOP) ===
-elif mode == "Live Scan":
-    st.warning("🟢 Mode Live Scan (simulasi) — cocok untuk kamera HP.")
-
-    if "scan_active" not in st.session_state:
-        st.session_state.scan_active = False
-
-    start_btn = st.button("▶️ Mulai Scan")
-    stop_btn = st.button("⏹️ Berhenti")
-
-    if start_btn:
-        st.session_state.scan_active = True
-    if stop_btn:
-        st.session_state.scan_active = False
-
-    if st.session_state.scan_active:
-        live_img = st.camera_input("Ambil frame untuk dianalisis")
-        if live_img is not None:
-            try:
-                img = Image.open(live_img).convert("RGB")
-                st.image(img, caption="Frame terbaru")
-
-                # Prediksi langsung
-                img_tensor = preprocess_pil(img)
-                label, conf = get_prediction(img_tensor)
-                st.markdown(
-                    f"<h3 style='text-align:center;'>Prediksi: {label.upper()} — {conf*100:.2f}%</h3>",
-                    unsafe_allow_html=True
-                )
-            except Exception as e:
-                st.error(f"❌ Error saat memproses frame: {e}")
-        else:
-            st.info("📸 Arahkan kamera ke kulit dan ambil gambar untuk melihat prediksi.")
-
 # ==========================
-# 📈 HASIL PREDIKSI (untuk Upload / Kamera)
+# 📈 HASIL PREDIKSI (Upload / Kamera)
 # ==========================
 if img is not None:
-    img_tensor = preprocess_pil(img)
-    label, conf = get_prediction(img_tensor)
+    # Deteksi apakah gambar mengandung kulit
+    is_skin, ratio = is_skin_image(img)
 
-    st.markdown("---")
-    st.markdown(
-        f"<h3 style='text-align: center;'>Prediksi: <b>{label.upper()}</b></h3>",
-        unsafe_allow_html=True
-    )
-    st.markdown(
-        f"<p style='text-align: center;'>Confidence Score: <b>{conf*100:.2f}%</b></p>",
-        unsafe_allow_html=True
-    )
+    if not is_skin:
+        st.warning(f"⚠️ Gambar ini tidak terdeteksi sebagai kulit (rasio kulit: {ratio*100:.2f}%). "
+                   "Silakan upload foto bagian kulit manusia yang jelas.")
+    else:
+        img_tensor = preprocess_pil(img)
+        label, conf = get_prediction(img_tensor)
+
+        st.markdown("---")
+        st.markdown(
+            f"<h3 style='text-align: center;'>Prediksi: <b>{label.upper()}</b></h3>",
+            unsafe_allow_html=True
+        )
+        st.markdown(
+            f"<p style='text-align: center;'>Confidence Score: <b>{conf*100:.2f}%</b></p>",
+            unsafe_allow_html=True
+        )
 
 # ==========================
 # 📚 FOOTER
@@ -146,4 +138,3 @@ st.markdown(
     "<p style='text-align: center; font-size: 13px; color: gray;'>Model dilatih menggunakan dataset HAM10000 — hanya untuk tujuan edukasi.</p>",
     unsafe_allow_html=True
 )
-
