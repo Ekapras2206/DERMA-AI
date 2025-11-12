@@ -114,7 +114,7 @@ if img is not None:
     is_skin, ratio = is_skin_image(img)
 
     if not is_skin:
-        st.warning(f"⚠️ Gambar ini tidak terdeteksi sebagai kulit (rasio kulit: {ratio*100:.2f}%). "
+        st.warning(f"⚠️ Gambar ini tidak terdeteksi sebagai kulit. "
                    "Silakan upload foto bagian kulit manusia yang jelas.")
     else:
         img_tensor = preprocess_pil(img)
@@ -138,3 +138,4 @@ st.markdown(
     "<p style='text-align: center; font-size: 13px; color: gray;'>Model dilatih menggunakan dataset HAM10000 — hanya untuk tujuan edukasi.</p>",
     unsafe_allow_html=True
 )
+
