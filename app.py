@@ -24,7 +24,7 @@ LABEL_MAP = {
     "vasc": "Vascular Lesions"
 }
 
-st.set_page_config(page_title="DERMA-AI (PyTorch)", layout="centered")
+st.set_page_config(page_title="DERMA-AI", layout="centered")
 
 # ==========================
 # 🔍 LOAD MODEL
@@ -149,4 +149,5 @@ st.markdown(
     "<p style='text-align: center; font-size: 13px; color: gray;'>Model dilatih menggunakan dataset HAM10000 — hanya untuk tujuan edukasi.</p>",
     unsafe_allow_html=True
 )
+
 
