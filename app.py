@@ -88,7 +88,7 @@ def get_prediction(img_tensor):
 # ==========================
 # 🩺 HEADER
 # ==========================
-st.markdown("<h1 style='text-align: center;'>DERMA-AI 🩺 (PyTorch)</h1>", unsafe_allow_html=True)
+st.markdown("<h1 style='text-align: center;'>DERMA-AI 🩺</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center;'>Upload atau ambil gambar kulitmu untuk klasifikasi lesi.</p>", unsafe_allow_html=True)
 
 # ==========================
@@ -149,5 +149,6 @@ st.markdown(
     "<p style='text-align: center; font-size: 13px; color: gray;'>Model dilatih menggunakan dataset HAM10000 — hanya untuk tujuan edukasi.</p>",
     unsafe_allow_html=True
 )
+
 
 
