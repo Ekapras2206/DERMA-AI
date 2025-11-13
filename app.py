@@ -13,6 +13,17 @@ MODEL_PATH = "model/derma_ai_final.pt"
 IMG_SIZE = 224
 CLASS_NAMES = ["akiec", "bcc", "bkl", "df", "nv", "mel", "vasc"]
 
+# Mapping label → nama lengkap
+LABEL_MAP = {
+    "akiec": "Actinic Keratoses",
+    "bcc": "Basal Cell Carcinoma",
+    "bkl": "Benign Keratosis",
+    "df": "Dermatofibroma",
+    "nv": "Melanocytic Nevi",
+    "mel": "Melanoma",
+    "vasc": "Vascular Lesions"
+}
+
 st.set_page_config(page_title="DERMA-AI (PyTorch)", layout="centered")
 
 # ==========================
@@ -96,7 +107,6 @@ if mode == "Upload Gambar":
 # === MODE 2: CAMERA SNAPSHOT ===
 elif mode == "Ambil dari Kamera":
     camera_img = st.camera_input("📷 Ambil foto dari kamera")
-
     if camera_img is not None:
         try:
             img = Image.open(camera_img).convert("RGB")
@@ -114,15 +124,16 @@ if img is not None:
     is_skin, ratio = is_skin_image(img)
 
     if not is_skin:
-        st.warning(f"⚠️ Gambar ini tidak terdeteksi sebagai kulit. "
+        st.warning("⚠️ Gambar ini tidak terdeteksi sebagai kulit. "
                    "Silakan upload foto bagian kulit manusia yang jelas.")
     else:
         img_tensor = preprocess_pil(img)
-        label, conf = get_prediction(img_tensor)
+        short_label, conf = get_prediction(img_tensor)
+        full_label = LABEL_MAP.get(short_label, short_label)  # ambil nama panjang
 
         st.markdown("---")
         st.markdown(
-            f"<h3 style='text-align: center;'>Prediksi: <b>{label.upper()}</b></h3>",
+            f"<h3 style='text-align: center;'>Prediksi: <b>{full_label}</b></h3>",
             unsafe_allow_html=True
         )
         st.markdown(
@@ -138,4 +149,3 @@ st.markdown(
     "<p style='text-align: center; font-size: 13px; color: gray;'>Model dilatih menggunakan dataset HAM10000 — hanya untuk tujuan edukasi.</p>",
     unsafe_allow_html=True
 )
-
