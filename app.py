@@ -133,7 +133,7 @@ if img is not None:
 
         st.markdown("---")
         st.markdown(
-            f"<h3 style='text-align: center;'>Prediksi: <b>{full_label}</b></h3>",
+            f"<h3 style='text-align: center;'>Prediction: <b>{full_label}</b></h3>",
             unsafe_allow_html=True
         )
         st.markdown(
@@ -149,3 +149,4 @@ st.markdown(
     "<p style='text-align: center; font-size: 13px; color: gray;'>Model dilatih menggunakan dataset HAM10000 — hanya untuk tujuan edukasi.</p>",
     unsafe_allow_html=True
 )
+
