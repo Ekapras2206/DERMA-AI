@@ -233,7 +233,7 @@ if original_img is not None:
             img_slot.image(processed_img)
             
             # 4. HAPUS SEGMENT TERPISAH
-            st.success("Area lesi terdeteksi dan ditandai langsung pada gambar di atas.")
+            st.success("Area lesi terdeteksi.")
         else:
             st.warning("Lesi tidak terdeteksi jelas oleh Grad-CAM.")
             img_slot.image(processed_img) # Tampilkan kembali gambar asli jika gagal
@@ -247,3 +247,4 @@ st.markdown(
     "<p style='text-align:center;color:gray;font-size:13px;'>Model ini hanya untuk edukasi.</p>",
     unsafe_allow_html=True
 )
+
