@@ -9,7 +9,7 @@ import cv2
 # ==========================
 # 🔧 CONFIGURATION
 # ==========================
-MODEL_PATH = "model/derma_ai_final.pt"
+MODEL_PATH = "model/derma_ai_best.pt"
 IMG_SIZE = 224
 CLASS_NAMES = ["akiec", "bcc", "bkl", "df", "nv", "mel", "vasc"]
 
@@ -149,6 +149,7 @@ st.markdown(
     "<p style='text-align: center; font-size: 13px; color: gray;'>Model dilatih menggunakan dataset HAM10000 — hanya untuk tujuan edukasi.</p>",
     unsafe_allow_html=True
 )
+
 
 
 
