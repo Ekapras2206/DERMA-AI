@@ -13,10 +13,16 @@ import torch.nn.functional as F
 MODEL_PATH = "model/derma_ai_best.pt"
 IMG_SIZE = 224
 
-# Tambahkan normal & nonskin
 CLASS_NAMES = [
-    "akiec", "bcc", "bkl", "df", "nv",
-    "mel", "vasc", "normal", "nonskin"
+    "akiec",  # 0
+    "bcc",    # 1
+    "bkl",    # 2
+    "df",     # 3
+    "mel",    # 4
+    "nonskin",# 5
+    "normal", # 6
+    "nv",     # 7
+    "vasc"    # 8
 ]
 
 LABEL_MAP = {
@@ -24,12 +30,13 @@ LABEL_MAP = {
     "bcc": "Basal Cell Carcinoma",
     "bkl": "Benign Keratosis",
     "df": "Dermatofibroma",
-    "nv": "Melanocytic Nevi",
     "mel": "Melanoma",
-    "vasc": "Vascular Lesions",
+    "nonskin": "Non-Skin Image",
     "normal": "Healthy Skin",
-    "nonskin": "Non-Skin Image"
+    "nv": "Melanocytic Nevi",
+    "vasc": "Vascular Lesions"
 }
+
 
 st.set_page_config(page_title="DERMA-AI", layout="centered")
 
@@ -247,4 +254,3 @@ st.markdown(
     "<p style='text-align:center;color:gray;font-size:13px;'>Model ini hanya untuk edukasi.</p>",
     unsafe_allow_html=True
 )
-
