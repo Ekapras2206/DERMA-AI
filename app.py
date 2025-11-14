@@ -8,13 +8,17 @@ import cv2
 import torch.nn.functional as F
 
 # ==========================
-# 🔧 CONFIGURATION
+# 🔧 CONFIG
 # ==========================
 MODEL_PATH = "model/derma_ai_best.pt"
 IMG_SIZE = 224
-CLASS_NAMES = ["akiec", "bcc", "bkl", "df", "nv", "mel", "vasc"]
 
-# Mapping label → nama lengkap
+# Tambahkan normal & nonskin
+CLASS_NAMES = [
+    "akiec", "bcc", "bkl", "df", "nv",
+    "mel", "vasc", "normal", "nonskin"
+]
+
 LABEL_MAP = {
     "akiec": "Actinic Keratoses",
     "bcc": "Basal Cell Carcinoma",
@@ -22,7 +26,9 @@ LABEL_MAP = {
     "df": "Dermatofibroma",
     "nv": "Melanocytic Nevi",
     "mel": "Melanoma",
-    "vasc": "Vascular Lesions"
+    "vasc": "Vascular Lesions",
+    "normal": "Healthy Skin",
+    "nonskin": "Non-Skin Image"
 }
 
 st.set_page_config(page_title="DERMA-AI", layout="centered")
@@ -46,24 +52,26 @@ def load_model(path=MODEL_PATH):
 model, device = load_model()
 
 # ==========================
-# 🧠 PREPROCESS FUNCTION
+# 🧠 PREPROCESS
 # ==========================
 def preprocess_pil(img: Image.Image):
     transform = transforms.Compose([
         transforms.Resize((IMG_SIZE, IMG_SIZE)),
         transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225]),
+        transforms.Normalize(
+            mean=[0.485, 0.456, 0.406],
+            std=[0.229, 0.224, 0.225]
+        )
     ])
     return transform(img).unsqueeze(0)
 
 # ==========================
-# 🧴 SKIN FILTER (OpenCV)
+# 🧴 SKIN FILTER
 # ==========================
 def is_skin_image(pil_img, threshold=0.05):
     img = np.array(pil_img.convert("RGB"))
-    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
-    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    img_bgr = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+    hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
 
     lower = np.array([0, 30, 60], dtype=np.uint8)
     upper = np.array([20, 150, 255], dtype=np.uint8)
@@ -74,68 +82,64 @@ def is_skin_image(pil_img, threshold=0.05):
     return skin_ratio > threshold, skin_ratio
 
 # ==========================
-# 📊 PREDICTION FUNCTION
+# 📊 PREDICTION
 # ==========================
 def get_prediction(img_tensor):
     img_tensor = img_tensor.to(device)
     with torch.no_grad():
-        outputs = model(img_tensor)
-        probs = torch.softmax(outputs, dim=1)
+        out = model(img_tensor)
+        probs = torch.softmax(out, dim=1)
         conf, idx = torch.max(probs, dim=1)
     return CLASS_NAMES[idx.item()], conf.item()
 
 # ==========================
-# 🔥 GRAD-CAM LOCALIZATION
+# 🔥 GRAD-CAM
 # ==========================
 def gradcam_on_image(model, img_tensor):
     model.eval()
     img_tensor = img_tensor.to(device)
 
-    gradients = []
-    activations = []
+    act = []
+    grad = []
 
-    def backward_hook(module, grad_input, grad_output):
-        gradients.append(grad_output[0])
-
-    def forward_hook(module, input, output):
-        activations.append(output)
+    def fwd_hook(m, i, o): act.append(o)
+    def bwd_hook(m, gi, go): grad.append(go[0])
 
     target_layer = model.features[-1]
-    fwd = target_layer.register_forward_hook(forward_hook)
-    bwd = target_layer.register_backward_hook(backward_hook)
+    f = target_layer.register_forward_hook(fwd_hook)
+    b = target_layer.register_backward_hook(bwd_hook)
 
-    output = model(img_tensor)
-    pred_class = output.argmax()
+    out = model(img_tensor)
+    cls = out.argmax()
 
     model.zero_grad()
-    output[0, pred_class].backward()
+    out[0, cls].backward()
 
-    grad = gradients[0].cpu().data.numpy()[0]
-    act = activations[0].cpu().data.numpy()[0]
+    f.remove()
+    b.remove()
 
-    fwd.remove()
-    bwd.remove()
+    grad_val = grad[0].cpu().numpy()[0]
+    act_val = act[0].cpu().numpy()[0]
 
-    weights = np.mean(grad, axis=(1, 2))
-    cam = np.zeros(act.shape[1:], dtype=np.float32)
+    weights = np.mean(grad_val, axis=(1, 2))
+    cam = np.zeros(act_val.shape[1:], dtype=np.float32)
 
     for i, w in enumerate(weights):
-        cam += w * act[i]
+        cam += w * act_val[i]
 
     cam = np.maximum(cam, 0)
-    cam = cam / cam.max()
-
+    cam /= cam.max() + 1e-9
     return cam
 
 # ==========================
-# 🎯 CAM → Bounding Box
+# 🎯 BOUNDING BOX (improved)
 # ==========================
 def get_bounding_box_from_cam(cam, orig_img):
-    h, w = orig_img.size[1], orig_img.size[0]
-    cam_resized = cv2.resize(cam, (w, h))
+    W, H = orig_img.size
+    heatmap = cv2.resize(cam, (W, H))
 
-    thresh = cam_resized > 0.4
-    coords = np.column_stack(np.where(thresh))
+    mask = heatmap > 0.3
+    coords = np.column_stack(np.where(mask))
 
     if len(coords) == 0:
         return None
@@ -143,76 +147,77 @@ def get_bounding_box_from_cam(cam, orig_img):
     y_min, x_min = coords.min(axis=0)
     y_max, x_max = coords.max(axis=0)
 
-    return (x_min, y_min, x_max, y_max)
+    # Perbesar box supaya lebih mencakup semua lesi
+    pad = int(0.1 * max(x_max - x_min, y_max - y_min))
+    x_min = max(0, x_min - pad)
+    y_min = max(0, y_min - pad)
+    x_max = min(W - 1, x_max + pad)
+    y_max = min(H - 1, y_max + pad)
+
+    return x_min, y_min, x_max, y_max
 
 # ==========================
-# 🩺 UI HEADER
+# 🩺 UI
 # ==========================
 st.markdown("<h1 style='text-align: center;'>DERMA-AI 🩺</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center;'>Upload atau ambil gambar kulitmu untuk klasifikasi lesi.</p>", unsafe_allow_html=True)
 
-# ==========================
-# 🖼️ MODE INPUT
-# ==========================
 mode = st.radio("Pilih cara input gambar:", ["Upload Gambar", "Ambil dari Kamera"])
 img = None
 
 if mode == "Upload Gambar":
-    uploaded = st.file_uploader("Pilih gambar kulit (JPG/PNG)", type=["jpg", "jpeg", "png"])
-    if uploaded:
-        img = Image.open(uploaded).convert("RGB")
-        st.image(img, caption="Gambar yang kamu upload")
+    file = st.file_uploader("Upload JPG/PNG", ["jpg", "jpeg", "png"])
+    if file:
+        img = Image.open(file).convert("RGB")
+        st.image(img)
 
-elif mode == "Ambil dari Kamera":
-    camera_img = st.camera_input("📷 Ambil foto dari kamera")
-    if camera_img is not None:
-        img = Image.open(camera_img).convert("RGB")
-        st.image(img, caption="Foto hasil kamera")
+else:
+    cam = st.camera_input("Ambil foto")
+    if cam:
+        img = Image.open(cam).convert("RGB")
+        st.image(img)
 
 # ==========================
-# 📈 HASIL PREDIKSI + BBOX
+# 🚀 PROCESS
 # ==========================
 if img is not None:
+
+    # Cek apakah gambar kulit
     is_skin, ratio = is_skin_image(img)
 
-    if not is_skin:
-        st.warning("⚠️ Gambar ini tidak terdeteksi sebagai kulit.")
+    img_tensor = preprocess_pil(img)
+    label, conf = get_prediction(img_tensor)
+    full_label = LABEL_MAP[label]
+
+    st.markdown("---")
+    st.markdown(
+        f"<h3 style='text-align:center;'>Prediction: <b>{full_label}</b></h3>",
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        f"<p style='text-align:center;'>Confidence: <b>{conf*100:.2f}%</b></p>",
+        unsafe_allow_html=True
+    )
+
+    # Bila normal / nonskin → tidak perlu GradCAM
+    if label in ["normal", "nonskin"]:
+        st.info("Tidak menampilkan bounding box karena gambar termasuk **kulit normal** atau **bukan kulit**.")
     else:
-        img_tensor = preprocess_pil(img)
-        short_label, conf = get_prediction(img_tensor)
-        full_label = LABEL_MAP.get(short_label, short_label)
-
-        st.markdown("---")
-        st.markdown(
-            f"<h3 style='text-align: center;'>Prediction: <b>{full_label}</b></h3>",
-            unsafe_allow_html=True
-        )
-        st.markdown(
-            f"<p style='text-align: center;'>Confidence Score: <b>{conf*100:.2f}%</b></p>",
-            unsafe_allow_html=True
-        )
-
-        # ===== GRAD-CAM =====
         cam = gradcam_on_image(model, img_tensor)
         bbox = get_bounding_box_from_cam(cam, img)
 
-        if bbox is not None:
+        if bbox:
             x1, y1, x2, y2 = bbox
-
             img_np = np.array(img)
-            img_bbox = img_np.copy()
-            cv2.rectangle(img_bbox, (x1, y1), (x2, y2), (255, 0, 0), 3)
+            img_box = img_np.copy()
+            cv2.rectangle(img_box, (x1, y1), (x2, y2), (255, 0, 0), 3)
 
-            st.markdown("### 📌 Deteksi Area Lesi (Bounding Box)")
-            st.image(img_bbox, use_column_width=True)
+            st.markdown("### 📌 Deteksi Area Lesi")
+            st.image(img_box, use_column_width=True)
         else:
-            st.info("Tidak ditemukan area lesi yang jelas dari Grad-CAM.")
+            st.info("Lesi tidak terdeteksi jelas oleh Grad-CAM.")
 
-# ==========================
-# 📚 FOOTER
-# ==========================
 st.markdown("---")
 st.markdown(
-    "<p style='text-align: center; font-size: 13px; color: gray;'>Model dilatih menggunakan dataset HAM10000 — hanya untuk tujuan edukasi.</p>",
+    "<p style='text-align:center;color:gray;font-size:13px;'>Model ini hanya untuk edukasi.</p>",
     unsafe_allow_html=True
 )
