@@ -102,8 +102,11 @@ def gradcam_on_image(model, img_tensor):
     act = []
     grad = []
 
-    def fwd_hook(m, i, o): act.append(o)
-    def bwd_hook(m, gi, go): grad.append(go[0])
+    def fwd_hook(m, i, o):
+        act.append(o)
+
+    def bwd_hook(m, gi, go):
+        grad.append(go[0])
 
     target_layer = model.features[-1]
     f = target_layer.register_forward_hook(fwd_hook)
@@ -118,8 +121,9 @@ def gradcam_on_image(model, img_tensor):
     f.remove()
     b.remove()
 
-    grad_val = grad[0].cpu().numpy()[0]
-    act_val = act[0].cpu().numpy()[0]
+    # 🟩 FIX: detach sebelum numpy()
+    grad_val = grad[0].detach().cpu().numpy()[0]
+    act_val = act[0].detach().cpu().numpy()[0]
 
     weights = np.mean(grad_val, axis=(1, 2))
     cam = np.zeros(act_val.shape[1:], dtype=np.float32)
@@ -130,6 +134,7 @@ def gradcam_on_image(model, img_tensor):
     cam = np.maximum(cam, 0)
     cam /= cam.max() + 1e-9
     return cam
+
 
 # ==========================
 # 🎯 BOUNDING BOX (improved)
@@ -221,3 +226,4 @@ st.markdown(
     "<p style='text-align:center;color:gray;font-size:13px;'>Model ini hanya untuk edukasi.</p>",
     unsafe_allow_html=True
 )
+
