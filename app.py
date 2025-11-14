@@ -2,7 +2,7 @@ import streamlit as st
 import torch
 import torchvision.transforms as transforms
 from torchvision import models
-from PIL import Image
+from PIL import Image, ImageDraw # Import ImageDraw untuk menggambar box
 import numpy as np
 import cv2
 import torch.nn.functional as F
@@ -121,7 +121,6 @@ def gradcam_on_image(model, img_tensor):
     f.remove()
     b.remove()
 
-    # 🟩 FIX: detach sebelum numpy()
     grad_val = grad[0].detach().cpu().numpy()[0]
     act_val = act[0].detach().cpu().numpy()[0]
 
@@ -162,34 +161,52 @@ def get_bounding_box_from_cam(cam, orig_img):
     return x_min, y_min, x_max, y_max
 
 # ==========================
+# 🎨 BARU: OVERLAY BBOX
+# ==========================
+def draw_box_on_pil(img_pil: Image.Image, bbox: tuple):
+    """Menggambar bounding box langsung pada objek PIL Image."""
+    x1, y1, x2, y2 = bbox
+    
+    # Gunakan ImageDraw untuk menggambar
+    draw = ImageDraw.Draw(img_pil)
+    
+    # Warna merah (RGB) dan tebal 3
+    draw.rectangle([(x1, y1), (x2, y2)], outline=(255, 0, 0), width=3)
+    
+    return img_pil
+
+# ==========================
 # 🩺 UI
 # ==========================
 st.markdown("<h1 style='text-align: center;'>DERMA-AI 🩺</h1>", unsafe_allow_html=True)
 
 mode = st.radio("Pilih cara input gambar:", ["Upload Gambar", "Ambil dari Kamera"])
-img = None
+img_slot = st.empty() # Slot untuk menahan gambar sebelum dan sesudah diproses
+original_img = None # Gambar PIL asli yang akan diproses
 
 if mode == "Upload Gambar":
     file = st.file_uploader("Upload JPG/PNG", ["jpg", "jpeg", "png"])
     if file:
-        img = Image.open(file).convert("RGB")
-        st.image(img)
+        original_img = Image.open(file).convert("RGB")
+        img_slot.image(original_img) # Tampilkan preview awal
 
 else:
     cam = st.camera_input("Ambil foto")
     if cam:
-        img = Image.open(cam).convert("RGB")
-        st.image(img)
+        original_img = Image.open(cam).convert("RGB")
+        img_slot.image(original_img) # Tampilkan preview awal
 
 # ==========================
 # 🚀 PROCESS
 # ==========================
-if img is not None:
+if original_img is not None:
+    # Salin gambar asli untuk dimodifikasi
+    processed_img = original_img.copy()
 
     # Cek apakah gambar kulit
-    is_skin, ratio = is_skin_image(img)
+    is_skin, ratio = is_skin_image(processed_img)
 
-    img_tensor = preprocess_pil(img)
+    img_tensor = preprocess_pil(processed_img)
     label, conf = get_prediction(img_tensor)
     full_label = LABEL_MAP[label]
 
@@ -203,27 +220,30 @@ if img is not None:
         unsafe_allow_html=True
     )
 
-    # Bila normal / nonskin → tidak perlu GradCAM
-    if label in ["normal", "nonskin"]:
-        st.info("Tidak menampilkan bounding box karena gambar termasuk **kulit normal** atau **bukan kulit**.")
-    else:
+    # 1. RUN GRAD-CAM DAN BBOX JIKA BUKAN NORMAL/NONSKIN
+    if label not in ["normal", "nonskin"]:
         cam = gradcam_on_image(model, img_tensor)
-        bbox = get_bounding_box_from_cam(cam, img)
+        bbox = get_bounding_box_from_cam(cam, processed_img)
 
         if bbox:
-            x1, y1, x2, y2 = bbox
-            img_np = np.array(img)
-            img_box = img_np.copy()
-            cv2.rectangle(img_box, (x1, y1), (x2, y2), (255, 0, 0), 3)
-
-            st.markdown("### 📌 Deteksi Area Lesi")
-            st.image(img_box, use_column_width=True)
+            # 2. GAMBAR BBOX LANGSUNG DI GAMBAR SALINAN
+            processed_img = draw_box_on_pil(processed_img, bbox)
+            
+            # 3. GANTI GAMBAR PREVIEW DI ATAS
+            img_slot.image(processed_img)
+            
+            # 4. HAPUS SEGMENT TERPISAH
+            st.success("Area lesi terdeteksi dan ditandai langsung pada gambar di atas.")
         else:
-            st.info("Lesi tidak terdeteksi jelas oleh Grad-CAM.")
+            st.warning("Lesi tidak terdeteksi jelas oleh Grad-CAM.")
+            img_slot.image(processed_img) # Tampilkan kembali gambar asli jika gagal
+
+    else:
+        st.info("Tidak menampilkan penandaan karena gambar termasuk **kulit normal** atau **bukan kulit**.")
+        img_slot.image(processed_img) # Tampilkan kembali gambar asli
 
 st.markdown("---")
 st.markdown(
     "<p style='text-align:center;color:gray;font-size:13px;'>Model ini hanya untuk edukasi.</p>",
     unsafe_allow_html=True
 )
-
