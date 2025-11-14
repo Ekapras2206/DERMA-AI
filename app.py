@@ -5,6 +5,7 @@ from torchvision import models
 from PIL import Image
 import numpy as np
 import cv2
+import torch.nn.functional as F
 
 # ==========================
 # 🔧 CONFIGURATION
@@ -60,12 +61,10 @@ def preprocess_pil(img: Image.Image):
 # 🧴 SKIN FILTER (OpenCV)
 # ==========================
 def is_skin_image(pil_img, threshold=0.05):
-    """Cek apakah gambar mengandung area kulit cukup besar"""
     img = np.array(pil_img.convert("RGB"))
     img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-    # Rentang warna kulit umum dalam HSV
     lower = np.array([0, 30, 60], dtype=np.uint8)
     upper = np.array([20, 150, 255], dtype=np.uint8)
 
@@ -86,7 +85,68 @@ def get_prediction(img_tensor):
     return CLASS_NAMES[idx.item()], conf.item()
 
 # ==========================
-# 🩺 HEADER
+# 🔥 GRAD-CAM LOCALIZATION
+# ==========================
+def gradcam_on_image(model, img_tensor):
+    model.eval()
+    img_tensor = img_tensor.to(device)
+
+    gradients = []
+    activations = []
+
+    def backward_hook(module, grad_input, grad_output):
+        gradients.append(grad_output[0])
+
+    def forward_hook(module, input, output):
+        activations.append(output)
+
+    target_layer = model.features[-1]
+    fwd = target_layer.register_forward_hook(forward_hook)
+    bwd = target_layer.register_backward_hook(backward_hook)
+
+    output = model(img_tensor)
+    pred_class = output.argmax()
+
+    model.zero_grad()
+    output[0, pred_class].backward()
+
+    grad = gradients[0].cpu().data.numpy()[0]
+    act = activations[0].cpu().data.numpy()[0]
+
+    fwd.remove()
+    bwd.remove()
+
+    weights = np.mean(grad, axis=(1, 2))
+    cam = np.zeros(act.shape[1:], dtype=np.float32)
+
+    for i, w in enumerate(weights):
+        cam += w * act[i]
+
+    cam = np.maximum(cam, 0)
+    cam = cam / cam.max()
+
+    return cam
+
+# ==========================
+# 🎯 CAM → Bounding Box
+# ==========================
+def get_bounding_box_from_cam(cam, orig_img):
+    h, w = orig_img.size[1], orig_img.size[0]
+    cam_resized = cv2.resize(cam, (w, h))
+
+    thresh = cam_resized > 0.4
+    coords = np.column_stack(np.where(thresh))
+
+    if len(coords) == 0:
+        return None
+
+    y_min, x_min = coords.min(axis=0)
+    y_max, x_max = coords.max(axis=0)
+
+    return (x_min, y_min, x_max, y_max)
+
+# ==========================
+# 🩺 UI HEADER
 # ==========================
 st.markdown("<h1 style='text-align: center;'>DERMA-AI 🩺</h1>", unsafe_allow_html=True)
 st.markdown("<p style='text-align: center;'>Upload atau ambil gambar kulitmu untuk klasifikasi lesi.</p>", unsafe_allow_html=True)
@@ -97,39 +157,30 @@ st.markdown("<p style='text-align: center;'>Upload atau ambil gambar kulitmu unt
 mode = st.radio("Pilih cara input gambar:", ["Upload Gambar", "Ambil dari Kamera"])
 img = None
 
-# === MODE 1: UPLOAD FILE ===
 if mode == "Upload Gambar":
     uploaded = st.file_uploader("Pilih gambar kulit (JPG/PNG)", type=["jpg", "jpeg", "png"])
     if uploaded:
         img = Image.open(uploaded).convert("RGB")
         st.image(img, caption="Gambar yang kamu upload")
 
-# === MODE 2: CAMERA SNAPSHOT ===
 elif mode == "Ambil dari Kamera":
     camera_img = st.camera_input("📷 Ambil foto dari kamera")
     if camera_img is not None:
-        try:
-            img = Image.open(camera_img).convert("RGB")
-            st.image(img, caption="Foto hasil kamera")
-        except Exception as e:
-            st.error(f"❌ Gagal membaca gambar dari kamera: {e}")
-    else:
-        st.info("Silakan ambil foto terlebih dahulu.")
+        img = Image.open(camera_img).convert("RGB")
+        st.image(img, caption="Foto hasil kamera")
 
 # ==========================
-# 📈 HASIL PREDIKSI (Upload / Kamera)
+# 📈 HASIL PREDIKSI + BBOX
 # ==========================
 if img is not None:
-    # Deteksi apakah gambar mengandung kulit
     is_skin, ratio = is_skin_image(img)
 
     if not is_skin:
-        st.warning("⚠️ Gambar ini tidak terdeteksi sebagai kulit. "
-                   "Silakan upload foto bagian kulit manusia yang jelas.")
+        st.warning("⚠️ Gambar ini tidak terdeteksi sebagai kulit.")
     else:
         img_tensor = preprocess_pil(img)
         short_label, conf = get_prediction(img_tensor)
-        full_label = LABEL_MAP.get(short_label, short_label)  # ambil nama panjang
+        full_label = LABEL_MAP.get(short_label, short_label)
 
         st.markdown("---")
         st.markdown(
@@ -141,6 +192,22 @@ if img is not None:
             unsafe_allow_html=True
         )
 
+        # ===== GRAD-CAM =====
+        cam = gradcam_on_image(model, img_tensor)
+        bbox = get_bounding_box_from_cam(cam, img)
+
+        if bbox is not None:
+            x1, y1, x2, y2 = bbox
+
+            img_np = np.array(img)
+            img_bbox = img_np.copy()
+            cv2.rectangle(img_bbox, (x1, y1), (x2, y2), (255, 0, 0), 3)
+
+            st.markdown("### 📌 Deteksi Area Lesi (Bounding Box)")
+            st.image(img_bbox, use_column_width=True)
+        else:
+            st.info("Tidak ditemukan area lesi yang jelas dari Grad-CAM.")
+
 # ==========================
 # 📚 FOOTER
 # ==========================
@@ -149,7 +216,3 @@ st.markdown(
     "<p style='text-align: center; font-size: 13px; color: gray;'>Model dilatih menggunakan dataset HAM10000 — hanya untuk tujuan edukasi.</p>",
     unsafe_allow_html=True
 )
-
-
-
-
