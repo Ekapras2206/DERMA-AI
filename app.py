@@ -2,7 +2,7 @@ import streamlit as st
 import torch
 import torchvision.transforms as transforms
 from torchvision import models
-from PIL import Image, ImageDraw # Import ImageDraw untuk menggambar box
+from PIL import Image, ImageDraw
 import numpy as np
 import cv2
 import torch.nn.functional as F
@@ -13,18 +13,21 @@ import torch.nn.functional as F
 MODEL_PATH = "model/derma_ai_best.pt"
 IMG_SIZE = 224
 
+# ✅ UPDATE: Menambahkan 'scabies' sesuai urutan abjad folder
 CLASS_NAMES = [
-    "akiec",  # 0
-    "bcc",    # 1
-    "bkl",    # 2
-    "df",     # 3
-    "mel",    # 4
-    "nonskin",# 5
-    "normal", # 6
-    "nv",     # 7
-    "vasc"    # 8
+    "akiec",    # 0
+    "bcc",      # 1
+    "bkl",      # 2
+    "df",       # 3
+    "mel",      # 4
+    "nonskin",  # 5
+    "normal",   # 6
+    "nv",       # 7
+    "scabies",  # 8  <-- BARU
+    "vasc"      # 9
 ]
 
+# ✅ UPDATE: Menambahkan nama lengkap untuk Scabies
 LABEL_MAP = {
     "akiec": "Actinic Keratoses",
     "bcc": "Basal Cell Carcinoma",
@@ -34,9 +37,9 @@ LABEL_MAP = {
     "nonskin": "Non-Skin Image",
     "normal": "Healthy Skin",
     "nv": "Melanocytic Nevi",
+    "scabies": "Scabies Infestation", # <-- BARU
     "vasc": "Vascular Lesions"
 }
-
 
 st.set_page_config(page_title="DERMA-AI", layout="centered")
 
@@ -48,15 +51,22 @@ def load_model(path=MODEL_PATH):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = models.efficientnet_b0(pretrained=False)
+    # Output layer disesuaikan dengan panjang CLASS_NAMES baru (10 kelas)
     model.classifier[1] = torch.nn.Linear(model.classifier[1].in_features, len(CLASS_NAMES))
 
+    # Load state dict
+    # Pastikan file .pt ini adalah hasil training terbaru dengan 10 kelas!
     state_dict = torch.load(path, map_location=device)
     model.load_state_dict(state_dict)
     model.to(device)
     model.eval()
     return model, device
 
-model, device = load_model()
+try:
+    model, device = load_model()
+except RuntimeError as e:
+    st.error(f"❌ Gagal memuat model! Kemungkinan model yang dipakai masih versi lama (9 kelas) tapi kode meminta 10 kelas. \nDetail: {e}")
+    st.stop()
 
 # ==========================
 # 🧠 PREPROCESS
@@ -143,7 +153,7 @@ def gradcam_on_image(model, img_tensor):
 
 
 # ==========================
-# 🎯 BOUNDING BOX (improved)
+# 🎯 BOUNDING BOX
 # ==========================
 def get_bounding_box_from_cam(cam, orig_img):
     W, H = orig_img.size
@@ -158,7 +168,6 @@ def get_bounding_box_from_cam(cam, orig_img):
     y_min, x_min = coords.min(axis=0)
     y_max, x_max = coords.max(axis=0)
 
-    # Perbesar box supaya lebih mencakup semua lesi
     pad = int(0.1 * max(x_max - x_min, y_max - y_min))
     x_min = max(0, x_min - pad)
     y_min = max(0, y_min - pad)
@@ -168,18 +177,13 @@ def get_bounding_box_from_cam(cam, orig_img):
     return x_min, y_min, x_max, y_max
 
 # ==========================
-# 🎨 BARU: OVERLAY BBOX
+# 🎨 OVERLAY BBOX
 # ==========================
 def draw_box_on_pil(img_pil: Image.Image, bbox: tuple):
-    """Menggambar bounding box langsung pada objek PIL Image."""
     x1, y1, x2, y2 = bbox
-    
-    # Gunakan ImageDraw untuk menggambar
     draw = ImageDraw.Draw(img_pil)
-    
-    # Warna merah (RGB) dan tebal 3
+    # Warna merah tebal
     draw.rectangle([(x1, y1), (x2, y2)], outline=(255, 0, 0), width=3)
-    
     return img_pil
 
 # ==========================
@@ -188,26 +192,25 @@ def draw_box_on_pil(img_pil: Image.Image, bbox: tuple):
 st.markdown("<h1 style='text-align: center;'>DERMA-AI 🩺</h1>", unsafe_allow_html=True)
 
 mode = st.radio("Pilih cara input gambar:", ["Upload Gambar", "Ambil dari Kamera"])
-img_slot = st.empty() # Slot untuk menahan gambar sebelum dan sesudah diproses
-original_img = None # Gambar PIL asli yang akan diproses
+img_slot = st.empty() 
+original_img = None 
 
 if mode == "Upload Gambar":
     file = st.file_uploader("Upload JPG/PNG", ["jpg", "jpeg", "png"])
     if file:
         original_img = Image.open(file).convert("RGB")
-        img_slot.image(original_img) # Tampilkan preview awal
+        img_slot.image(original_img)
 
 else:
     cam = st.camera_input("Ambil foto")
     if cam:
         original_img = Image.open(cam).convert("RGB")
-        img_slot.image(original_img) # Tampilkan preview awal
+        img_slot.image(original_img)
 
 # ==========================
 # 🚀 PROCESS
 # ==========================
 if original_img is not None:
-    # Salin gambar asli untuk dimodifikasi
     processed_img = original_img.copy()
 
     # Cek apakah gambar kulit
@@ -227,27 +230,23 @@ if original_img is not None:
         unsafe_allow_html=True
     )
 
-    # 1. RUN GRAD-CAM DAN BBOX JIKA BUKAN NORMAL/NONSKIN
+    # Logic untuk menampilkan Bbox
+    # Scabies termasuk yang PERLU bbox, jadi tidak dimasukkan ke list pengecualian
     if label not in ["normal", "nonskin"]:
         cam = gradcam_on_image(model, img_tensor)
         bbox = get_bounding_box_from_cam(cam, processed_img)
 
         if bbox:
-            # 2. GAMBAR BBOX LANGSUNG DI GAMBAR SALINAN
             processed_img = draw_box_on_pil(processed_img, bbox)
-            
-            # 3. GANTI GAMBAR PREVIEW DI ATAS
             img_slot.image(processed_img)
-            
-            # 4. HAPUS SEGMENT TERPISAH
             st.success("Area lesi terdeteksi.")
         else:
             st.warning("Lesi tidak terdeteksi jelas oleh Grad-CAM.")
-            img_slot.image(processed_img) # Tampilkan kembali gambar asli jika gagal
+            img_slot.image(processed_img)
 
     else:
         st.info("Tidak menampilkan penandaan karena gambar termasuk **kulit normal** atau **bukan kulit**.")
-        img_slot.image(processed_img) # Tampilkan kembali gambar asli
+        img_slot.image(processed_img)
 
 st.markdown("---")
 st.markdown(
